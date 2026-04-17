@@ -37,11 +37,10 @@ func TestListCommand(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "alpha") {
-		t.Errorf("expected 'alpha' in output, got: %s", out)
-	}
-	if !strings.Contains(out, "beta") {
-		t.Errorf("expected 'beta' in output, got: %s", out)
+	for _, name := range []string{"alpha", "beta"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("expected %q in output, got: %s", name, out)
+		}
 	}
 }
 
