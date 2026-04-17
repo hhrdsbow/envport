@@ -1,57 +1,54 @@
 package copy
 
-import (
-	"fmt"
+import "fmt"
 
-	"github.com/envport/envport/internal/profile"
-)
-
-// Manager defines the interface for profile storage needed by copy.
+// Manager is the interface required to copy snapshots.
 type Manager interface {
 	Load(name string) (map[string]string, error)
-	Save(name string, vars map[string]string) error
+	Save(name string, env map[string]string) error
 	List() ([]string, error)
 }
 
-// Run copies a snapshot from src to dst, optionally overwriting.
-func Run(mgr Manager, src, dst string, overwrite bool) error {
-	if src == "" {
-		return fmt.Errorf("source snapshot name must not be empty")
-	}
-	if dst == "" {
-		return fmt.Errorf("destination snapshot name must not be empty")
-	}
-	if src == dst {
-		return fmt.Errorf("source and destination must differ")
-	}
+// ErrNotFound is returned when the source snapshot does not exist.
+type ErrNotFound struct {
+	Name string
+}
 
-	vars, err := mgr.Load(src)
+func (e *ErrNotFound) Error() string {
+	return fmt.Sprintf("snapshot %q not found", e.Name)
+}
+
+// ErrAlreadyExists is returned when the destination snapshot already exists.
+type ErrAlreadyExists struct {
+	Name string
+}
+
+func (e *ErrAlreadyExists) Error() string {
+	return fmt.Sprintf("snapshot %q already exists", e.Name)
+}
+
+// Run copies a snapshot from src to dst.
+// If overwrite is true, an existing dst snapshot will be replaced.
+func Run(m Manager, src, dst string, overwrite bool) error {
+	env, err := m.Load(src)
 	if err != nil {
-		return fmt.Errorf("load %q: %w", src, err)
+		return &ErrNotFound{Name: src}
 	}
 
 	if !overwrite {
-		names, err := mgr.List()
+		names, err := m.List()
 		if err != nil {
-			return fmt.Errorf("list snapshots: %w", err)
+			return fmt.Errorf("listing snapshots: %w", err)
 		}
 		for _, n := range names {
 			if n == dst {
-				return fmt.Errorf("snapshot %q already exists; use --overwrite to replace", dst)
+				return &ErrAlreadyExists{Name: dst}
 			}
 		}
 	}
 
-	cloned := make(map[string]string, len(vars))
-	for k, v := range vars {
-		cloned[k] = v
-	}
-
-	if err := mgr.Save(dst, cloned); err != nil {
-		return fmt.Errorf("save %q: %w", dst, err)
+	if err := m.Save(dst, env); err != nil {
+		return fmt.Errorf("saving snapshot %q: %w", dst, err)
 	}
 	return nil
 }
-
-// Ensure *profile.Manager satisfies Manager at compile time.
-var _ Manager = (*profile.Manager)(nil)
