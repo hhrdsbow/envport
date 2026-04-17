@@ -59,3 +59,13 @@ func TestWriteOrdering(t *testing.T) {
 		t.Errorf("expected sorted output, got: %v", lines)
 	}
 }
+
+func TestWriteEmptyEnv(t *testing.T) {
+	formats := []Format{FormatShell, FormatDotenv, FormatJSON}
+	for _, f := range formats {
+		var b strings.Builder
+		if err := Write(&b, map[string]string{}, f); err != nil {
+			t.Errorf("format %q: unexpected error for empty env: %v", f, err)
+		}
+	}
+}
