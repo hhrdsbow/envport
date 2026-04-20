@@ -27,6 +27,10 @@ func init() {
 }
 
 func runExport(name string, format export.Format) error {
+	if !export.IsValidFormat(format) {
+		return fmt.Errorf("unknown format %q: must be one of shell, dotenv, json", format)
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
