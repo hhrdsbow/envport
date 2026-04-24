@@ -2,66 +2,52 @@ package snapshot
 
 import (
 	"encoding/json"
-	"os"
+	"fmt"
 	"time"
 )
 
-// Snapshot represents a saved set of environment variables.
+// Snapshot holds a named set of environment variables captured at a point in time.
 type Snapshot struct {
 	Name      string            `json:"name"`
+	Vars      map[string]string `json:"vars"`
 	CreatedAt time.Time         `json:"created_at"`
-	Env       map[string]string `json:"env"`
 }
 
-// New creates a new Snapshot from the current environment.
-func New(name string, environ []string) *Snapshot {
-	env := make(map[string]string, len(environ))
-	for _, e := range environ {
-		for i := 0; i < len(e); i++ {
-			if e[i] == '=' {
-				env[e[:i]] = e[i+1:]
-				break
-			}
-		}
+// Manager describes the persistence operations a snapshot store must support.
+type Manager interface {
+	Save(s *Snapshot) error
+	Load(name string) (*Snapshot, error)
+	Delete(name string) error
+	List() ([]string, error)
+}
+
+// New creates a new Snapshot with the given name and variable map.
+func New(name string, vars map[string]string) *Snapshot {
+	copy := make(map[string]string, len(vars))
+	for k, v := range vars {
+		copy[k] = v
 	}
 	return &Snapshot{
 		Name:      name,
+		Vars:      copy,
 		CreatedAt: time.Now().UTC(),
-		Env:       env,
 	}
 }
 
-// Save writes the snapshot to a JSON file at the given path.
-func (s *Snapshot) Save(path string) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	return enc.Encode(s)
-}
-
-// Load reads a snapshot from a JSON file at the given path.
-func Load(path string) (*Snapshot, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
+// Load deserialises a Snapshot from JSON bytes.
+func Load(data []byte) (*Snapshot, error) {
 	var s Snapshot
-	if err := json.NewDecoder(f).Decode(&s); err != nil {
-		return nil, err
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, fmt.Errorf("snapshot: unmarshal: %w", err)
 	}
 	return &s, nil
 }
 
-// ToExports returns a slice of "export KEY=VALUE" strings.
-func (s *Snapshot) ToExports() []string {
-	lines := make([]string, 0, len(s.Env))
-	for k, v := range s.Env {
-		lines = append(lines, "export "+k+"="+v)
+// Bytes serialises the Snapshot to JSON.
+func (s *Snapshot) Bytes() ([]byte, error) {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: marshal: %w", err)
 	}
-	return lines
+	return b, nil
 }

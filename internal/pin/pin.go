@@ -1,14 +1,18 @@
+// Package pin manages "pinned" snapshots — snapshots that are protected from
+// automated pruning or expiry operations.
 package pin
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 )
 
-// ErrNotFound is returned when a pinned snapshot is not found.
-var ErrNotFound = errors.New("pin not found")
+// ErrNotPinned is returned when an unpin is attempted on a name that is not
+// currently pinned.
+var ErrNotPinned = errors.New("pin: snapshot is not pinned")
 
-// Store is the persistence interface for pins.
+// Store is the persistence interface required by the pin manager.
 type Store interface {
 	Set(key, value string) error
 	Get(key string) (string, error)
@@ -16,55 +20,55 @@ type Store interface {
 	List() (map[string]string, error)
 }
 
-// Manager manages pinned snapshots (alias -> snapshot name).
+const prefix = "pin:"
+
+// Manager wraps a Store and provides pin / unpin / list operations.
 type Manager struct {
 	store Store
 }
 
-// New creates a new pin Manager.
+// New returns a Manager backed by the provided Store.
 func New(s Store) *Manager {
 	return &Manager{store: s}
 }
 
-// Pin associates an alias with a snapshot name.
-func (m *Manager) Pin(alias, snapshot string) error {
-	if alias == "" {
-		return errors.New("alias must not be empty")
+// Add marks the named snapshot as pinned.
+func (m *Manager) Add(name string) error {
+	if err := m.store.Set(prefix+name, "1"); err != nil {
+		return fmt.Errorf("pin add %q: %w", name, err)
 	}
-	if snapshot == "" {
-		return errors.New("snapshot must not be empty")
-	}
-	return m.store.Set(alias, snapshot)
+	return nil
 }
 
-// Resolve returns the snapshot name for the given alias.
-func (m *Manager) Resolve(alias string) (string, error) {
-	v, err := m.store.Get(alias)
-	if err != nil {
-		return "", ErrNotFound
+// Remove unmarks the named snapshot.
+func (m *Manager) Remove(name string) error {
+	if _, err := m.store.Get(prefix + name); err != nil {
+		return ErrNotPinned
 	}
-	return v, nil
+	if err := m.store.Delete(prefix + name); err != nil {
+		return fmt.Errorf("pin remove %q: %w", name, err)
+	}
+	return nil
 }
 
-// Unpin removes the alias.
-func (m *Manager) Unpin(alias string) error {
-	return m.store.Delete(alias)
+// IsPinned reports whether the named snapshot is currently pinned.
+func (m *Manager) IsPinned(name string) bool {
+	_, err := m.store.Get(prefix + name)
+	return err == nil
 }
 
-// List returns all alias -> snapshot mappings sorted by alias.
-func (m *Manager) List() ([][2]string, error) {
+// List returns the names of all pinned snapshots in sorted order.
+func (m *Manager) List() ([]string, error) {
 	all, err := m.store.List()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("pin list: %w", err)
 	}
-	keys := make([]string, 0, len(all))
+	var names []string
 	for k := range all {
-		keys = append(keys, k)
+		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
+			names = append(names, k[len(prefix):])
+		}
 	}
-	sort.Strings(keys)
-	out := make([][2]string, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, [2]string{k, all[k]})
-	}
-	return out, nil
+	sort.Strings(names)
+	return names, nil
 }

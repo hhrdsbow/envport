@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -13,82 +15,85 @@ import (
 func init() {
 	pinCmd := &cobra.Command{
 		Use:   "pin",
-		Short: "Manage pinned snapshot aliases",
+		Short: "Manage pinned snapshots",
 	}
 
-	addCmd := &cobra.Command{
-		Use:   "add <alias> <snapshot>",
-		Short: "Pin a snapshot under an alias",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPinAdd(args[0], args[1])
+	pinCmd.AddCommand(
+		&cobra.Command{
+			Use:   "add <name>",
+			Short: "Pin a snapshot to protect it from pruning",
+			Args:  cobra.ExactArgs(1),
+			RunE:  runPinAdd,
 		},
-	}
-
-	removeCmd := &cobra.Command{
-		Use:   "remove <alias>",
-		Short: "Remove a pinned alias",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPinRemove(args[0])
+		&cobra.Command{
+			Use:   "remove <name>",
+			Short: "Unpin a snapshot",
+			Args:  cobra.ExactArgs(1),
+			RunE:  runPinRemove,
 		},
-	}
-
-	listCmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all pinned aliases",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPinList()
+		&cobra.Command{
+			Use:   "list",
+			Short: "List all pinned snapshots",
+			Args:  cobra.NoArgs,
+			RunE:  runPinList,
 		},
-	}
+	)
 
-	pinCmd.AddCommand(addCmd, removeCmd, listCmd)
 	rootCmd.AddCommand(pinCmd)
 }
 
 func openPinManager() (*pin.Manager, error) {
-	s, err := store.Open("pins")
+	s, err := store.Open(defaultStorePath())
 	if err != nil {
 		return nil, err
 	}
 	return pin.New(s), nil
 }
 
-func runPinAdd(alias, snapshot string) error {
+func runPinAdd(_ *cobra.Command, args []string) error {
 	m, err := openPinManager()
 	if err != nil {
 		return err
 	}
-	if err := m.Pin(alias, snapshot); err != nil {
+	if err := m.Add(args[0]); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "Pinned %q -> %q\n", alias, snapshot)
+	fmt.Fprintf(os.Stdout, "pinned %q\n", args[0])
 	return nil
 }
 
-func runPinRemove(alias string) error {
+func runPinRemove(_ *cobra.Command, args []string) error {
 	m, err := openPinManager()
 	if err != nil {
 		return err
 	}
-	return m.Unpin(alias)
+	if err := m.Remove(args[0]); err != nil {
+		if errors.Is(err, pin.ErrNotPinned) {
+			return fmt.Errorf("%q is not pinned", args[0])
+		}
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "unpinned %q\n", args[0])
+	return nil
 }
 
-func runPinList() error {
+func runPinList(_ *cobra.Command, _ []string) error {
 	m, err := openPinManager()
 	if err != nil {
 		return err
 	}
-	list, err := m.List()
+	names, err := m.List()
 	if err != nil {
 		return err
 	}
-	if len(list) == 0 {
-		fmt.Fprintln(os.Stdout, "No pins defined.")
+	if len(names) == 0 {
+		fmt.Fprintln(os.Stdout, "no pinned snapshots")
 		return nil
 	}
-	for _, pair := range list {
-		fmt.Fprintf(os.Stdout, "%-20s %s\n", pair[0], pair[1])
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME")
+	for _, n := range names {
+		fmt.Fprintln(w, n)
 	}
-	return nil
+	return w.Flush()
 }

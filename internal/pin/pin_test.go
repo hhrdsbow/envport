@@ -2,89 +2,96 @@ package pin_test
 
 import (
 	"errors"
-	"sync"
 	"testing"
 
 	"envport/internal/pin"
 )
 
-// memStore is an in-memory Store for testing.
-type memStore struct {
-	mu   sync.Mutex
-	data map[string]string
+// newMemStore returns a simple in-memory Store implementation for tests.
+func newMemStore() pin.Store {
+	return &memStore{data: map[string]string{}}
 }
 
-func newMemStore() *memStore { return &memStore{data: map[string]string{}} }
+type memStore struct{ data map[string]string }
 
-func (s *memStore) Set(k, v string) error {
-	s.mu.Lock(); defer s.mu.Unlock()
-	s.data[k] = v; return nil
-}
-func (s *memStore) Get(k string) (string, error) {
-	s.mu.Lock(); defer s.mu.Unlock()
-	v, ok := s.data[k]
-	if !ok { return "", errors.New("not found") }
+func (m *memStore) Set(k, v string) error          { m.data[k] = v; return nil }
+func (m *memStore) Get(k string) (string, error) {
+	v, ok := m.data[k]
+	if !ok {
+		return "", errors.New("not found")
+	}
 	return v, nil
 }
-func (s *memStore) Delete(k string) error {
-	s.mu.Lock(); defer s.mu.Unlock()
-	delete(s.data, k); return nil
+func (m *memStore) Delete(k string) error {
+	delete(m.data, k)
+	return nil
 }
-func (s *memStore) List() (map[string]string, error) {
-	s.mu.Lock(); defer s.mu.Unlock()
-	copy := map[string]string{}
-	for k, v := range s.data { copy[k] = v }
+func (m *memStore) List() (map[string]string, error) {
+	copy := make(map[string]string, len(m.data))
+	for k, v := range m.data {
+		copy[k] = v
+	}
 	return copy, nil
 }
 
-func TestPinAndResolve(t *testing.T) {
+func TestAddAndIsPinned(t *testing.T) {
 	m := pin.New(newMemStore())
-	if err := m.Pin("prod", "snap-001"); err != nil {
-		t.Fatalf("Pin: %v", err)
+	if m.IsPinned("prod") {
+		t.Fatal("expected prod to not be pinned initially")
 	}
-	got, err := m.Resolve("prod")
-	if err != nil || got != "snap-001" {
-		t.Fatalf("Resolve: got %q, err %v", got, err)
+	if err := m.Add("prod"); err != nil {
+		t.Fatalf("Add: %v", err)
 	}
-}
-
-func TestResolveNotFound(t *testing.T) {
-	m := pin.New(newMemStore())
-	_, err := m.Resolve("missing")
-	if !errors.Is(err, pin.ErrNotFound) {
-		t.Fatalf("expected ErrNotFound, got %v", err)
+	if !m.IsPinned("prod") {
+		t.Fatal("expected prod to be pinned after Add")
 	}
 }
 
-func TestUnpin(t *testing.T) {
+func TestRemovePinned(t *testing.T) {
 	m := pin.New(newMemStore())
-	_ = m.Pin("dev", "snap-002")
-	_ = m.Unpin("dev")
-	_, err := m.Resolve("dev")
-	if !errors.Is(err, pin.ErrNotFound) {
-		t.Fatal("expected ErrNotFound after unpin")
+	_ = m.Add("staging")
+	if err := m.Remove("staging"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if m.IsPinned("staging") {
+		t.Fatal("expected staging to be unpinned after Remove")
+	}
+}
+
+func TestRemoveNotPinned(t *testing.T) {
+	m := pin.New(newMemStore())
+	err := m.Remove("ghost")
+	if !errors.Is(err, pin.ErrNotPinned) {
+		t.Fatalf("expected ErrNotPinned, got %v", err)
 	}
 }
 
 func TestList(t *testing.T) {
 	m := pin.New(newMemStore())
-	_ = m.Pin("b", "snap-b")
-	_ = m.Pin("a", "snap-a")
-	list, err := m.List()
-	if err != nil || len(list) != 2 {
-		t.Fatalf("List: %v %v", list, err)
+	_ = m.Add("b")
+	_ = m.Add("a")
+	_ = m.Add("c")
+	names, err := m.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
 	}
-	if list[0][0] != "a" || list[1][0] != "b" {
-		t.Fatalf("List not sorted: %v", list)
+	if len(names) != 3 {
+		t.Fatalf("expected 3 pinned names, got %d", len(names))
+	}
+	for i, want := range []string{"a", "b", "c"} {
+		if names[i] != want {
+			t.Errorf("names[%d]: want %q, got %q", i, want, names[i])
+		}
 	}
 }
 
-func TestPinValidation(t *testing.T) {
+func TestListEmpty(t *testing.T) {
 	m := pin.New(newMemStore())
-	if err := m.Pin("", "snap"); err == nil {
-		t.Fatal("expected error for empty alias")
+	names, err := m.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
 	}
-	if err := m.Pin("alias", ""); err == nil {
-		t.Fatal("expected error for empty snapshot")
+	if len(names) != 0 {
+		t.Fatalf("expected empty list, got %v", names)
 	}
 }
