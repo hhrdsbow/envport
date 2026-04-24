@@ -56,6 +56,12 @@ func openTagManager() (*tag.Manager, error) {
 }
 
 func runTagAdd(t, snapshot string) error {
+	if strings.TrimSpace(t) == "" {
+		return fmt.Errorf("tag name must not be empty")
+	}
+	if strings.TrimSpace(snapshot) == "" {
+		return fmt.Errorf("snapshot name must not be empty")
+	}
 	mgr, err := openTagManager()
 	if err != nil {
 		return err
@@ -84,6 +90,10 @@ func runTagList(args []string) error {
 		snaps, err := mgr.Get(args[0])
 		if err != nil {
 			return err
+		}
+		if len(snaps) == 0 {
+			fmt.Fprintf(os.Stdout, "no snapshots found for tag %q\n", args[0])
+			return nil
 		}
 		fmt.Fprintln(os.Stdout, strings.Join(snaps, "\n"))
 		return nil
