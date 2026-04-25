@@ -61,6 +61,13 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+func TestDeleteMissing(t *testing.T) {
+	m := newTestManager(t)
+	if err := m.Delete("nonexistent"); err == nil {
+		t.Error("expected error deleting nonexistent profile")
+	}
+}
+
 func TestList(t *testing.T) {
 	m := newTestManager(t)
 	for _, name := range []string{"alpha", "beta", "gamma"} {
