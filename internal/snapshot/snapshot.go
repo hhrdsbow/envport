@@ -13,15 +13,7 @@ type Snapshot struct {
 	CreatedAt time.Time         `json:"created_at"`
 }
 
-// Manager describes the persistence operations a snapshot store must support.
-type Manager interface {
-	Save(s *Snapshot) error
-	Load(name string) (*Snapshot, error)
-	Delete(name string) error
-	List() ([]string, error)
-}
-
-// New creates a new Snapshot with the given name and variable map.
+// New creates a new Snapshot with the given name and variables.
 func New(name string, vars map[string]string) *Snapshot {
 	copy := make(map[string]string, len(vars))
 	for k, v := range vars {
@@ -45,9 +37,5 @@ func Load(data []byte) (*Snapshot, error) {
 
 // Bytes serialises the Snapshot to JSON.
 func (s *Snapshot) Bytes() ([]byte, error) {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return nil, fmt.Errorf("snapshot: marshal: %w", err)
-	}
-	return b, nil
+	return json.Marshal(s)
 }
