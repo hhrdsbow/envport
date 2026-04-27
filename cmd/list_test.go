@@ -64,3 +64,36 @@ func TestListCommandEmpty(t *testing.T) {
 		t.Errorf("expected empty message, got: %s", out)
 	}
 }
+
+// TestListCommandSingleEntry verifies that a single saved snapshot appears
+// in the list output and that the output does not contain unrelated names.
+func TestListCommandSingleEntry(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ENVPORT_STORE_DIR", dir)
+
+	mgr, err := profile.New(dir)
+	if err != nil {
+		t.Fatalf("profile.New: %v", err)
+	}
+
+	snap := snapshot.New(map[string]string{"KEY": "value"})
+	if err := mgr.Save("only-one", snap); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	rootCmd.SetOut(buf)
+	rootCmd.SetArgs([]string{"list"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "only-one") {
+		t.Errorf("expected %q in output, got: %s", "only-one", out)
+	}
+	if strings.Contains(out, "No snapshots") {
+		t.Errorf("unexpected empty message when snapshot exists, got: %s", out)
+	}
+}
