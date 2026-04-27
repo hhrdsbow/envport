@@ -21,6 +21,8 @@ type Result struct {
 
 // RunAdd adds prefix p to every key in the snapshot named src, saving the
 // result to dst. If src == dst the snapshot is updated in place.
+// Keys that already start with p are kept unchanged and recorded in
+// Result.Skipped to avoid double-prefixing.
 func RunAdd(m Manager, src, dst, p string) (Result, error) {
 	if p == "" {
 		return Result{}, fmt.Errorf("prefix must not be empty")
@@ -32,9 +34,14 @@ func RunAdd(m Manager, src, dst, p string) (Result, error) {
 	out := make(map[string]string, len(vars))
 	var res Result
 	for k, v := range vars {
-		nk := p + k
-		out[nk] = v
-		res.Added = append(res.Added, nk)
+		if strings.HasPrefix(k, p) {
+			out[k] = v
+			res.Skipped = append(res.Skipped, k)
+		} else {
+			nk := p + k
+			out[nk] = v
+			res.Added = append(res.Added, nk)
+		}
 	}
 	if err := m.Save(dst, out); err != nil {
 		return Result{}, fmt.Errorf("save %q: %w", dst, err)
