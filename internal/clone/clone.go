@@ -20,6 +20,7 @@ type Options struct {
 }
 
 // Run clones src snapshot into dest. If dest is empty a name is derived from src.
+// The final name used is returned; it may differ from dest if dest was already taken.
 func Run(m Manager, src, dest string, opts Options) (string, error) {
 	if src == "" {
 		return "", fmt.Errorf("source name must not be empty")
@@ -41,7 +42,7 @@ func Run(m Manager, src, dest string, opts Options) (string, error) {
 
 	existing, err := m.List()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("list snapshots: %w", err)
 	}
 	taken := make(map[string]bool, len(existing))
 	for _, n := range existing {
