@@ -72,3 +72,16 @@ func TestFormat(t *testing.T) {
 		t.Error("missing modified")
 	}
 }
+
+func TestFormatNoChanges(t *testing.T) {
+	a := &memSnap{name: "x", vars: map[string]string{"FOO": "bar"}}
+	b := &memSnap{name: "y", vars: map[string]string{"FOO": "bar"}}
+	r := compare.Run(a, b)
+	out := compare.Format(r)
+	if !strings.Contains(out, "compare x..y") {
+		t.Error("missing header")
+	}
+	if strings.Contains(out, "+") || strings.Contains(out, "-") || strings.Contains(out, "~") {
+		t.Error("expected no diff lines when there are no changes")
+	}
+}
