@@ -1,52 +1,52 @@
-// Package flatten merges multiple snapshots into a single flat variable map,
-// applying each snapshot in order so later entries override earlier ones.
 package flatten
 
-import (
-	"errors"
-	"fmt"
-)
+import "fmt"
 
-// Snapshot is the minimal interface required by the flatten package.
-type Snapshot interface {
-	Name() string
-	Vars() map[string]string
-}
-
-// Manager can load snapshots by name.
+// Manager can load named snapshots by name.
 type Manager interface {
-	Load(name string) (Snapshot, error)
+	Load(name string) (map[string]string, error)
+	Save(name string, vars map[string]string) error
 }
 
-// Result holds the merged variable map and a record of which snapshot
-// each key was last contributed by.
+// Result holds the merged vars and metadata about the operation.
 type Result struct {
-	Vars    map[string]string
-	Sources map[string]string // key -> snapshot name
+	Vars     map[string]string
+	Sources  []string
+	Conflicts int
 }
 
-// Run loads each named snapshot in order and merges their variables.
-// Later snapshots override keys from earlier ones.
-func Run(mgr Manager, names []string) (*Result, error) {
+// Run merges the snapshots identified by names into dest.
+// Later entries in names win on key conflicts.
+func Run(m Manager, names []string, dest string) (Result, error) {
 	if len(names) == 0 {
-		return nil, errors.New("flatten: at least one snapshot name is required")
+		return Result{}, fmt.Errorf("flatten: at least one source name required")
 	}
 
-	out := &Result{
-		Vars:    make(map[string]string),
-		Sources: make(map[string]string),
-	}
+	merged := make(map[string]string)
+	seen := make(map[string]string) // key -> first source that set it
+	conflicts := 0
 
 	for _, name := range names {
-		snap, err := mgr.Load(name)
+		vars, err := m.Load(name)
 		if err != nil {
-			return nil, fmt.Errorf("flatten: loading %q: %w", name, err)
+			return Result{}, fmt.Errorf("flatten: load %q: %w", name, err)
 		}
-		for k, v := range snap.Vars() {
-			out.Vars[k] = v
-			out.Sources[k] = snap.Name()
+		for k, v := range vars {
+			if _, exists := seen[k]; exists {
+				conflicts++
+			}
+			seen[k] = name
+			merged[k] = v
 		}
 	}
 
-	return out, nil
+	if err := m.Save(dest, merged); err != nil {
+		return Result{}, fmt.Errorf("flatten: save %q: %w", dest, err)
+	}
+
+	return Result{
+		Vars:      merged,
+		Sources:   names,
+		Conflicts: conflicts,
+	}, nil
 }

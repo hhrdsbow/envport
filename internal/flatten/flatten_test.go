@@ -4,90 +4,92 @@ import (
 	"errors"
 	"testing"
 
-	"envport/internal/flatten"
+	"github.com/user/envport/internal/flatten"
 )
 
-// --- test doubles ---
-
-type memSnap struct {
-	name string
-	vars map[string]string
-}
-
-func (s *memSnap) Name() string            { return s.name }
-func (s *memSnap) Vars() map[string]string { return s.vars }
-
+// memManager is an in-memory Manager for testing.
 type memManager struct {
-	snaps map[string]*memSnap
+	store map[string]map[string]string
 }
 
-func (m *memManager) Load(name string) (flatten.Snapshot, error) {
-	s, ok := m.snaps[name]
+func newManager() *memManager {
+	return &memManager{store: make(map[string]map[string]string)}
+}
+
+func (m *memManager) Load(name string) (map[string]string, error) {
+	v, ok := m.store[name]
 	if !ok {
-		return nil, errors.New("not found: " + name)
+		return nil, errors.New("not found")
 	}
-	return s, nil
+	out := make(map[string]string, len(v))
+	for k, val := range v {
+		out[k] = val
+	}
+	return out, nil
 }
 
-func newManager(snaps ...*memSnap) *memManager {
-	m := &memManager{snaps: make(map[string]*memSnap)}
-	for _, s := range snaps {
-		m.snaps[s.name] = s
-	}
-	return m
+func (m *memManager) Save(name string, vars map[string]string) error {
+	m.store[name] = vars
+	return nil
 }
 
-// --- tests ---
+func seed(m *memManager, name string, vars map[string]string) {
+	m.store[name] = vars
+}
 
 func TestRunNoNames(t *testing.T) {
-	mgr := newManager()
-	_, err := flatten.Run(mgr, nil)
+	m := newManager()
+	_, err := flatten.Run(m, nil, "out")
 	if err == nil {
 		t.Fatal("expected error for empty names")
 	}
 }
 
-func TestRunSingleSnapshot(t *testing.T) {
-	mgr := newManager(&memSnap{name: "base", vars: map[string]string{"A": "1", "B": "2"}})
-	res, err := flatten.Run(mgr, []string{"base"})
+func TestRunMergesInOrder(t *testing.T) {
+	m := newManager()
+	seed(m, "a", map[string]string{"FOO": "1", "BAR": "2"})
+	seed(m, "b", map[string]string{"BAR": "99", "BAZ": "3"})
+
+	res, err := flatten.Run(m, []string{"a", "b"}, "merged")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Vars["A"] != "1" || res.Vars["B"] != "2" {
-		t.Fatalf("unexpected vars: %v", res.Vars)
+	if res.Vars["FOO"] != "1" {
+		t.Errorf("FOO: got %q want %q", res.Vars["FOO"], "1")
 	}
-	if res.Sources["A"] != "base" {
-		t.Fatalf("expected source 'base', got %q", res.Sources["A"])
+	if res.Vars["BAR"] != "99" {
+		t.Errorf("BAR: got %q want %q", res.Vars["BAR"], "99")
+	}
+	if res.Vars["BAZ"] != "3" {
+		t.Errorf("BAZ: got %q want %q", res.Vars["BAZ"], "3")
+	}
+	if res.Conflicts != 1 {
+		t.Errorf("conflicts: got %d want 1", res.Conflicts)
 	}
 }
 
-func TestRunLaterOverrides(t *testing.T) {
-	mgr := newManager(
-		&memSnap{name: "base", vars: map[string]string{"A": "base_val", "B": "shared"}},
-		&memSnap{name: "override", vars: map[string]string{"A": "new_val", "C": "extra"}},
-	)
-	res, err := flatten.Run(mgr, []string{"base", "override"})
+func TestRunSavesPersisted(t *testing.T) {
+	m := newManager()
+	seed(m, "src", map[string]string{"X": "hello"})
+
+	_, err := flatten.Run(m, []string{"src"}, "dest")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Vars["A"] != "new_val" {
-		t.Errorf("expected A=new_val, got %q", res.Vars["A"])
+
+	loaded, err := m.Load("dest")
+	if err != nil {
+		t.Fatalf("load dest: %v", err)
 	}
-	if res.Vars["B"] != "shared" {
-		t.Errorf("expected B=shared, got %q", res.Vars["B"])
-	}
-	if res.Sources["A"] != "override" {
-		t.Errorf("expected source 'override' for A, got %q", res.Sources["A"])
-	}
-	if res.Sources["B"] != "base" {
-		t.Errorf("expected source 'base' for B, got %q", res.Sources["B"])
+	if loaded["X"] != "hello" {
+		t.Errorf("X: got %q want %q", loaded["X"], "hello")
 	}
 }
 
-func TestRunMissingSnapshot(t *testing.T) {
-	mgr := newManager()
-	_, err := flatten.Run(mgr, []string{"ghost"})
+func TestRunMissingSource(t *testing.T) {
+	m := newManager()
+	_, err := flatten.Run(m, []string{"missing"}, "out")
 	if err == nil {
-		t.Fatal("expected error for missing snapshot")
+		t.Fatal("expected error for missing source")
 	}
 }
