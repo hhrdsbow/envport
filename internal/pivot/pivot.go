@@ -1,49 +1,69 @@
-// Package pivot provides functionality to transpose a snapshot's
-// key-value pairs into a new snapshot keyed by value.
+// Package pivot swaps the keys and values of a snapshot so that every
+// value becomes a key and every key becomes its value.
+// Keys that would collide after pivoting are deduplicated by keeping the
+// lexicographically first original key.
 package pivot
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"sort"
+)
 
-// Snapshot is the minimal interface required by the pivot runner.
-type Snapshot interface {
-	Vars() map[string]string
-}
-
-// Manager can load and save snapshots by name.
+// Manager is the minimal interface required by Run.
 type Manager interface {
-	Load(name string) (Snapshot, error)
+	Load(name string) (map[string]string, error)
 	Save(name string, vars map[string]string) error
 }
 
-// Result describes the outcome of a pivot operation.
-type Result struct {
-	Src  string
-	Dest string
-	Keys int
+// Run loads src, inverts key↔value, and saves the result to dst.
+// If dst is empty the result is saved back to src.
+func Run(m Manager, src, dst string) (map[string]string, error) {
+	if src == "" {
+		return nil, errors.New("source name must not be empty")
+	}
+
+	vars, err := m.Load(src)
+	if err != nil {
+		return nil, fmt.Errorf("load %q: %w", src, err)
+	}
+
+	pivoted, err := invert(vars)
+	if err != nil {
+		return nil, err
+	}
+
+	target := src
+	if dst != "" {
+		target = dst
+	}
+
+	if err := m.Save(target, pivoted); err != nil {
+		return nil, fmt.Errorf("save %q: %w", target, err)
+	}
+
+	return pivoted, nil
 }
 
-// Run loads the snapshot named src, inverts its key→value mapping so that
-// values become keys and keys become values, then saves the result as dest.
-// If two keys share the same value the last one (in iteration order) wins;
-// callers that need determinism should sort before calling.
-func Run(m Manager, src, dest string) (Result, error) {
-	snap, err := m.Load(src)
-	if err != nil {
-		return Result{}, fmt.Errorf("pivot: load %q: %w", src, err)
+// invert swaps keys and values, resolving collisions by preferring the
+// lexicographically smallest original key.
+func invert(vars map[string]string) (map[string]string, error) {
+	// Collect keys in sorted order so collision resolution is deterministic.
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 
-	vars := snap.Vars()
-	inverted := make(map[string]string, len(vars))
-	for k, v := range vars {
+	out := make(map[string]string, len(vars))
+	for _, k := range keys {
+		v := vars[k]
 		if v == "" {
-			continue // skip blank values — they cannot become keys
+			continue // skip blank values — they cannot become valid keys
 		}
-		inverted[v] = k
+		if _, exists := out[v]; !exists {
+			out[v] = k
+		}
 	}
-
-	if err := m.Save(dest, inverted); err != nil {
-		return Result{}, fmt.Errorf("pivot: save %q: %w", dest, err)
-	}
-
-	return Result{Src: src, Dest: dest, Keys: len(inverted)}, nil
+	return out, nil
 }

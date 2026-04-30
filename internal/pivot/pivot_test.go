@@ -4,83 +4,109 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/user/envport/internal/pivot"
+	"github.com/your-org/envport/internal/pivot"
 )
 
-// --- in-memory fakes ---
-
-type memSnap struct{ vars map[string]string }
-
-func (s *memSnap) Vars() map[string]string { return s.vars }
+// --- in-memory manager ---
 
 type memManager struct {
-	snaps map[string]*memSnap
+	store map[string]map[string]string
 }
 
 func newMemManager() *memManager {
-	return &memManager{snaps: make(map[string]*memSnap)}
+	return &memManager{store: make(map[string]map[string]string)}
 }
 
-func (m *memManager) Load(name string) (pivot.Snapshot, error) {
-	s, ok := m.snaps[name]
+func (m *memManager) Load(name string) (map[string]string, error) {
+	v, ok := m.store[name]
 	if !ok {
 		return nil, errors.New("not found")
 	}
-	return s, nil
+	out := make(map[string]string, len(v))
+	for k, val := range v {
+		out[k] = val
+	}
+	return out, nil
 }
 
 func (m *memManager) Save(name string, vars map[string]string) error {
-	m.snaps[name] = &memSnap{vars: vars}
+	cp := make(map[string]string, len(vars))
+	for k, v := range vars {
+		cp[k] = v
+	}
+	m.store[name] = cp
 	return nil
 }
 
 func seed(m *memManager, name string, vars map[string]string) {
-	m.snaps[name] = &memSnap{vars: vars}
+	_ = m.Save(name, vars)
 }
 
 // --- tests ---
 
-func TestRunPivotsSnapshot(t *testing.T) {
+func TestRunPivotsKeyValues(t *testing.T) {
 	m := newMemManager()
-	seed(m, "src", map[string]string{"HOST": "localhost", "PORT": "8080"})
+	seed(m, "p", map[string]string{"HOST": "localhost", "PORT": "8080"})
 
-	res, err := pivot.Run(m, "src", "dst")
+	got, err := pivot.Run(m, "p", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Keys != 2 {
-		t.Errorf("expected 2 keys, got %d", res.Keys)
+
+	if got["localhost"] != "HOST" {
+		t.Errorf("expected localhost→HOST, got %q", got["localhost"])
+	}
+	if got["8080"] != "PORT" {
+		t.Errorf("expected 8080→PORT, got %q", got["8080"])
+	}
+}
+
+func TestRunSavesToDst(t *testing.T) {
+	m := newMemManager()
+	seed(m, "src", map[string]string{"A": "1"})
+
+	_, err := pivot.Run(m, "src", "dst")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	dst := m.snaps["dst"]
-	if dst.vars["localhost"] != "HOST" {
-		t.Errorf("expected localhost→HOST, got %q", dst.vars["localhost"])
+	v, err := m.Load("dst")
+	if err != nil {
+		t.Fatalf("dst not saved: %v", err)
 	}
-	if dst.vars["8080"] != "PORT" {
-		t.Errorf("expected 8080→PORT, got %q", dst.vars["8080"])
+	if v["1"] != "A" {
+		t.Errorf("expected 1→A in dst, got %q", v["1"])
 	}
 }
 
 func TestRunSkipsBlankValues(t *testing.T) {
 	m := newMemManager()
-	seed(m, "src", map[string]string{"EMPTY": "", "KEY": "val"})
+	seed(m, "p", map[string]string{"EMPTY": "", "KEY": "val"})
 
-	res, err := pivot.Run(m, "src", "dst")
+	got, err := pivot.Run(m, "p", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Keys != 1 {
-		t.Errorf("expected 1 key (blank skipped), got %d", res.Keys)
+	if _, ok := got[""]; ok {
+		t.Error("blank value should not become a key")
 	}
-	if _, ok := m.snaps["dst"].vars[""]; ok {
-		t.Error("blank value should not appear as key in destination")
+	if got["val"] != "KEY" {
+		t.Errorf("expected val→KEY, got %q", got["val"])
 	}
 }
 
-func TestRunMissingSource(t *testing.T) {
+func TestRunMissingSnapshot(t *testing.T) {
 	m := newMemManager()
-	_, err := pivot.Run(m, "missing", "dst")
+	_, err := pivot.Run(m, "missing", "")
 	if err == nil {
-		t.Fatal("expected error for missing source snapshot")
+		t.Fatal("expected error for missing snapshot")
+	}
+}
+
+func TestRunEmptySourceName(t *testing.T) {
+	m := newMemManager()
+	_, err := pivot.Run(m, "", "dst")
+	if err == nil {
+		t.Fatal("expected error for empty source name")
 	}
 }

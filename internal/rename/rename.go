@@ -1,41 +1,46 @@
 package rename
 
-import "fmt"
+import "errors"
 
-// Manager defines the interface for snapshot storage needed by rename.
+// Manager is the interface required by Run.
 type Manager interface {
 	Load(name string) (map[string]string, error)
-	Save(name string, env map[string]string) error
+	Save(name string, vars map[string]string) error
 	Delete(name string) error
 }
 
-// ErrNotFound is returned when the source snapshot does not exist.
-type ErrNotFound struct {
-	Name string
-}
-
-func (e *ErrNotFound) Error() string {
-	return fmt.Sprintf("snapshot %q not found", e.Name)
-}
-
-// Run renames a snapshot from src to dst.
-// It loads the src snapshot, saves it under dst, then deletes src.
-func Run(m Manager, src, dst string) error {
-	if src == dst {
-		return fmt.Errorf("source and destination names are identical: %q", src)
+// Run renames srcName to dstName in the profile store.
+// It loads the source snapshot, saves it under the destination name,
+// then deletes the source. Returns an error if src is missing or dst
+// already exists (unless overwrite is true).
+func Run(m Manager, srcName, dstName string, overwrite bool) error {
+	if srcName == "" {
+		return errors.New("source name must not be empty")
+	}
+	if dstName == "" {
+		return errors.New("destination name must not be empty")
+	}
+	if srcName == dstName {
+		return errors.New("source and destination names are identical")
 	}
 
-	env, err := m.Load(src)
+	vars, err := m.Load(srcName)
 	if err != nil {
-		return &ErrNotFound{Name: src}
+		return fmt.Errorf("load %q: %w", srcName, err)
 	}
 
-	if err := m.Save(dst, env); err != nil {
-		return fmt.Errorf("saving snapshot %q: %w", dst, err)
+	if !overwrite {
+		if _, err := m.Load(dstName); err == nil {
+			return fmt.Errorf("destination %q already exists; use --overwrite to replace", dstName)
+		}
 	}
 
-	if err := m.Delete(src); err != nil {
-		return fmt.Errorf("deleting old snapshot %q: %w", src, err)
+	if err := m.Save(dstName, vars); err != nil {
+		return fmt.Errorf("save %q: %w", dstName, err)
+	}
+
+	if err := m.Delete(srcName); err != nil {
+		return fmt.Errorf("delete source %q: %w", srcName, err)
 	}
 
 	return nil
