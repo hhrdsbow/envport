@@ -58,7 +58,7 @@ func runAliasAdd(cmd *cobra.Command, args []string) error {
 	if err := m.Add(args[0], args[1]); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "alias %q → %q saved\n", args[0], args[1])
+	fmt.Fprintf(cmd.OutOrStdout(), "alias %q \u2192 %q saved\n", args[0], args[1])
 	return nil
 }
 
@@ -87,7 +87,7 @@ func runAliasList(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "no aliases defined")
 		return nil
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ALIAS\tSNAPSHOT")
 	for a, t := range list {
 		fmt.Fprintf(w, "%s\t%s\n", a, t)
